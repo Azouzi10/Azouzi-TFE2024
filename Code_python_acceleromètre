@@ -1,0 +1,115 @@
+import serial
+import time
+import matplotlib.pyplot as plt
+import numpy as np
+import ast
+from scipy.signal import butter, filtfilt
+from scipy import integrate
+
+port = "COM5" 
+baud_rate = 921600
+ser = serial.Serial(port, baud_rate)
+t_acquisition = 20.0
+g = 9.81
+
+
+liste_a = []
+liste_t = []
+
+
+start_time = time.time()
+next_sample_time = start_time
+initial_time = None
+
+try:
+    while (time.time() - start_time) <= t_acquisition:
+        line = ser.readline()
+        line = line.strip().split()
+       
+        
+        if len(line) == 7:
+            current_time = float(line[3].decode())/1000.0
+            #print(current_time)
+
+            if initial_time is None:
+                initial_time = current_time
+            relative_time = current_time - initial_time
+            #print(relative_time)
+            
+            if relative_time < 0:
+                accel_corr = 0
+                
+            else:
+                accel = (float(line[6].decode())-9.81)/9.81
+                offset = 0.03669724770642214
+                accel_corr = (accel + offset)
+              
+              
+
+            liste_a.append(accel_corr)     
+            liste_t.append(relative_time)
+    
+    with open('acceleration.txt', 'w') as fichier_acceleration:
+        fichier_acceleration.write('Accélération (g)\n')
+        for a in liste_a:
+            fichier_acceleration.write(f"{a}\n")
+
+    with open('temps.txt', 'w') as fichier_temps:
+        fichier_temps.write('Temps (s)\n')
+        for t in liste_t:
+            fichier_temps.write(f"{t}\n")     
+
+
+    plt.figure(1) # Ajoutez un numéro d'index à la figure pour l'accélération
+    plt.plot(liste_t, liste_a)
+    plt.xlabel('Temps (s)')
+    plt.ylabel('Accélération en g')
+    plt.title('Accélération en fonction du temps')
+    plt.xlim(0, t_acquisition)
+    plt.ylim(-8,8)
+    plt.grid(True)
+    plt.show(block=False) # Utilisez block=False pour ne pas bloquer l'exécution du code
+
+
+except KeyboardInterrupt:
+    ser.close()
+    print("Connexion série fermée.")
+
+
+
+liste_a = np.array(liste_a)
+y = liste_a * g
+b, a = butter(1, 20/(1000/2), 'low')
+y = filtfilt(b, a, y)
+
+
+moy = np.mean(y)
+y = y - moy
+b, a = butter(1, 0.75/(1000/2), 'high')
+y_hp = filtfilt(b, a, y)
+v_noise =  integrate.cumtrapz(y_hp, liste_t, initial=0)
+
+
+
+moy1 = np.mean(v_noise)
+v_noise = v_noise - moy1
+b, a = butter(1, 0.75/(1000/2), 'high')
+v = filtfilt(b, a, v_noise)
+x_noise =  integrate.cumtrapz(v, liste_t, initial=0)
+print(x_noise)
+
+plt.figure(2)  
+plt.plot(liste_t, x_noise)
+plt.xlabel('Temps [s]')
+plt.ylabel('Position du fil de contact [m]')
+plt.title('Signal de position après traitement')
+plt.grid(True)
+plt.show()
+
+
+'''with open('x_noise.txt', 'w') as fichier_x_noise:
+        fichier_x_noise.write('Position (m)\n')
+        for x in x_noise:
+            fichier_x_noise.write(f"{x}\n")'''
+
+
