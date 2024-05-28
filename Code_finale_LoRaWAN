@@ -1,0 +1,166 @@
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+#include <HardwareSerial.h>
+
+// Configuration pour le capteur MPU6050
+Adafruit_MPU6050 mpu;
+#define I2C_SDA 33
+#define I2C_SCL 25
+#define MPU6050_ADDR 0x68
+TwoWire I2CMPU = TwoWire(0);
+
+// Configuration des délais et des états
+unsigned long previousTime = 0;
+const int32_t Ts = 1; // en millisecondes
+const int32_t Tacq = 20000; // Temps d'acquisition après détection: 20 secondes 
+bool dataAcquisitionStarted = false;
+unsigned long accelerationStart = 0;
+bool continueMeasuring = true;
+
+const int ledPin = 16;
+unsigned long ledPreviousTime = 0;
+const unsigned long ledBlinkInterval = 1000; // 1 seconde
+bool ledState = false;
+
+// Configuration pour le module LoRa (RAK3172)
+HardwareSerial SerialLoRa(1);
+bool joined = false;
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 1; // Intervalle d'envoi des données en millisecondes
+
+
+void setup() {
+  // Initialisation du port série pour le débogage
+  Serial.begin(921600);
+  Wire.begin(I2C_SDA, I2C_SCL);
+  Wire.setClock(400000);
+
+  // Initialisation de la LED
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
+
+  // Initialisation du capteur MPU6050
+  if (!mpu.begin()) {
+    while (1); // Boucle infinie si l'initialisation du MPU6050 échoue
+  }
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+  mpu.setFilterBandwidth(MPU6050_BAND_260_HZ);
+  delay(1000);
+
+  // Initialisation du module LoRa
+  Serial1.begin(115200, SERIAL_8N1, 18, 19); 
+  pinMode(23, OUTPUT);  
+  digitalWrite(23, HIGH);
+
+  Serial.println("Configuration du module LoRa (RAK3172) via AT commands");
+
+  // Envoyer les commandes AT et vérifier les réponses
+  sendATCommand("AT");
+  sendATCommand("AT+DEVEUI=AC1F09FFFE0A9B92"); // Assurez-vous que DEVEUI est une chaîne de 16 caractères hexadécimaux
+  sendATCommand("AT+APPEUI=EE2E2E2E2E2EE2E2"); // Assurez-vous que APPEUI est une chaîne de 16 caractères hexadécimaux
+  sendATCommand("AT+APPKEY=EB808763F5ACB250D9B3EAEBC93A5D2B"); // Assurez-vous que APPKEY est une chaîne de 32 caractères hexadécimaux
+
+  // Configurer la région (par exemple, EU868 pour l'Europe)
+  sendATCommand("AT+NWM=1"); // Assurez-vous que le module est en mode LoRaWAN
+  sendATCommand("AT+DR=0"); // Configurez la région à EU868 (vérifiez que '0' correspond à votre région dans la documentation)
+
+  delay(1000); // Petite pause pour permettre au module de traiter les commandes
+
+  sendATCommand("AT+JOIN");
+  Serial.println("Commande JOIN envoyée");
+}
+
+void loop() {
+  if (!continueMeasuring) return; // Arrête la boucle si plus aucune mesure n'est nécessaire
+
+  unsigned long currentTime = millis();
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  float corrected_az = a.acceleration.x - 9.81; // Correction de l'accélération due à la gravité
+  float offset = 0.33;
+  float accel_corr = corrected_az - offset;
+
+  Serial.print("accélération de la LAC : ");
+  Serial.println(accel_corr); // Affiche toujours l'accélération
+
+  if (currentTime - previousTime >= Ts) {
+    if (fabs(accel_corr) >= 20.0) {
+      dataAcquisitionStarted = true;
+      accelerationStart = currentTime; 
+      Serial.println("Début de l'acquisition");
+    }
+
+    if (dataAcquisitionStarted) {
+      if (currentTime - ledPreviousTime >= ledBlinkInterval) {
+        ledState = !ledState;
+        digitalWrite(ledPin, ledState);
+        ledPreviousTime = currentTime;
+      }
+    }
+
+    if (dataAcquisitionStarted && currentTime - accelerationStart > Tacq) {
+      dataAcquisitionStarted = false;
+      continueMeasuring = false; 
+      Serial.println("Fin d'acquisition");
+      digitalWrite(ledPin, LOW);
+    }
+
+    previousTime = currentTime;
+  }
+
+  // Lire et afficher toutes les réponses du module RAK3172
+  reponse();
+
+  // Envoyer des données toutes les 1 milliseconde si le join est réussi
+  if (joined && currentTime - lastSendTime >= sendInterval) {
+    lastSendTime = currentTime;
+    sendFloatData(accel_corr); // Envoyer l'accélération corrigée
+  }
+}
+
+
+void sendATCommand(const char* command) {
+  Serial1.println(command);
+  Serial.print("Envoi de la commande AT: ");
+  Serial.println(command);
+  delay(2000); // Délai pour que le module traite la commande
+  reponse();
+}
+
+void reponse() {
+  while (Serial1.available()) {
+    String line = Serial1.readStringUntil('\n');
+    Serial.print("Réponse du module LoRa: ");
+    Serial.println(line);
+    if (line.indexOf("+EVT:JOINED") != -1) {
+      Serial.println("Appareil rejoint le réseau avec succès!");
+      joined = true;
+    } else if (line.indexOf("+EVT:JOIN_FAILED") != -1) {
+      Serial.println("Échec de la jonction!");
+      joined = false;
+    }
+    line = "";
+  }
+}
+
+void sendLoRaData(const char* hexData) {
+  String cmd = "AT+SEND=1:"; // Port 1
+  cmd += String(hexData);
+  sendATCommand(cmd.c_str());
+  Serial.print("Envoi des données: ");
+  Serial.println(hexData);
+}
+
+
+void sendFloatData(float data) {
+  union {
+    float f;
+    uint8_t b[4];
+  } floatToBytes;
+  floatToBytes.f = data;
+  char hexData[9]; // 8 caractères pour 4 octets + 1 pour le null terminator
+  sprintf(hexData, "%02X%02X%02X%02X", floatToBytes.b[3], floatToBytes.b[2], floatToBytes.b[1], floatToBytes.b[0]);
+  sendLoRaData(hexData);
+}
