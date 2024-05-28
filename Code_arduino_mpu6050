@@ -1,0 +1,58 @@
+// Basic demo for accelerometer readings from Adafruit MPU6050
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+Adafruit_MPU6050 mpu;  
+
+#define I2C_SDA 33
+#define I2C_SCL 25
+#define MPU6050_ADDR 0x68
+TwoWire I2CMPU = TwoWire(0);
+long temps;
+unsigned long previousTime = 0;
+const unsigned long Ts = 1;    //en millisecondes
+
+
+void setup() {
+  Serial.begin(921600);
+  Wire.begin(33, 25); 
+  Wire.setClock(400000); // Configurer I2C à 400kHz  
+  if (!mpu.begin()) {
+    //Serial.println("Échec de l'initialisation du MPU6050. Vérifiez vos connexions!");
+    while (1);
+  }
+  //Serial.println("MPU6050 initialisé avec succès");
+  
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+  mpu.setFilterBandwidth(MPU6050_BAND_260_HZ);
+  
+
+  //print(mpu.getCycleRate())
+  //mpu.setCycleRate()
+  
+
+  //temps = millis();
+  //Serial.println("");
+  //delay(5);
+
+}
+
+void loop() {
+
+  unsigned long currentTime = millis();
+  /* Get new sensor events with the readings */
+  //long temps = millis();
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+if (currentTime - previousTime >= Ts) {
+
+  Serial.print(" -> t : ");
+  Serial.print(currentTime);
+  Serial.print("\t az : ");
+  Serial.println(a.acceleration.z);
+  
+  
+  previousTime = currentTime; // Mise à jour du temps précédent
+  }
+}
