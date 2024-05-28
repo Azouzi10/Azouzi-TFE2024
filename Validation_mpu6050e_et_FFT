@@ -1,0 +1,124 @@
+clear all;
+close all;
+
+
+t_real = load('temps_reel.txt'); % temps de simulation au moyen de Kairos
+save('fichier_mat.mat', 't_real'); 
+
+x_real = load('position_reel.txt'); % positions du fil de contact
+save('fichier_mat.mat', 'x_real'); 
+
+v_real = load('vitesse_reel.txt'); % vitesses du fil de contact
+save('fichier_mat.mat', 'v_real'); 
+
+a_real = load('accélération_reel.txt'); % accélérations du fil de contact
+save('fichier_mat.mat', 'a_real'); 
+
+noise_mpu6050 = load('acc_noise.txt');  % identification du bruit 
+save('fichier_mat.mat', 'noise_mpu6050');
+
+
+Ts=0.001;    % période d'échantillonage                    
+fs=1/Ts;   
+
+a_real1 = a_real(1:size(noise_mpu6050));
+t_real1 = t_real(1:size(noise_mpu6050));
+xreal1 = x_real(1:size(noise_mpu6050));
+
+
+noise_mpu6050 = noise_mpu6050 - mean(noise_mpu6050);  % Retrait de la moyenne du bruit 
+a_noise = a_real1 + noise_mpu6050; % Bruitage des données d'accélérations
+a_noise = lowpass(a_noise,20,1000); % filtre passe  bas  pour garder le signal utile 0-20 Hz 
+
+v_noise = cumtrapz(t_real1,a_noise); % Intégration avec v0 = 0 
+x_noise = cumtrapz(t_real1,v_noise); % Intégration avec x0 = 0
+
+Start_time = 4.5;
+End_time = t_real(end);
+
+correction = (t_real1>=Start_time) & (t_real1<=End_time); % regréssion polynomial d'ordre n 
+coeff = polyfit(t_real1(correction),x_noise(correction),2);
+drift_line = polyval(coeff,t_real1(correction));
+
+x_corr = x_noise;
+x_corr(correction) = x_corr(correction) - drift_line;
+
+
+
+plot(t_real1,xreal1,'b')
+hold on 
+plot(t_real1,x_corr,'r')
+legend('position simulée dans Kairos' ,'position corrigée après ajout du bruit')
+xlabel('Temps [s]')
+ylabel('Position [m]')
+hold off 
+
+
+
+
+% %%%% Validation de l'accéléromètre en simulation  -- précision de +-5mm %%%%%
+error = xreal1 - x_corr;
+[max_error, idx] = max(abs(error));
+
+figure 
+plot(t_real1,error)
+hold on 
+plot(t_real1(idx), max_error, 'p', 'MarkerSize', 15, 'MarkerEdgeColor', 'red', 'MarkerFaceColor', 'red'); % Marquer le max avec une étoile
+xlabel('Temps [s]')
+ylabel('Erreur [m]')
+hold off 
+
+
+
+
+
+
+
+% Y = fft(a_real1);
+% L = length(a_real1);
+% P2 = abs(Y/L);
+% P1 = P2(1:L/2+1);
+% P1(2:end-1) = 2*P1(2:end-1);
+% 
+% 
+% f = fs*(0:(L/2))/L;
+% figure
+% stem(f,P1) 
+% xlabel('f (Hz)')
+% ylabel('Amplitude acceleration')
+% title('fft')
+% xlim([0;50])
+% 
+% 
+% 
+% Y = fft(a_noise);
+% L = length(a_noise);
+% P2 = abs(Y/L);
+% P1 = P2(1:L/2+1);
+% P1(2:end-1) = 2*P1(2:end-1);
+% 
+% 
+% f = fs*(0:(L/2))/L;
+% figure
+% stem(f,P1) 
+% xlabel('f [Hz]')
+% ylabel('Amplitude du signal [m]')
+% % title('fft')
+% xlim([0;50])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
