@@ -1,0 +1,75 @@
+clear all;
+close all;
+
+
+temps_60s = load('temps.txt'); 
+save('fichier_mat.mat', 'temps_60s');
+temps_60s=temps_60s(1:end-4);
+
+
+test3 = load('Test3.txt'); 
+save('fichier_mat.mat', 'test3')
+plot(temps_60s,test3)
+
+
+g=9.81;
+test3_g = test3*g;
+% figure
+% plot(temps_60s,test3*g)
+% xlabel('Temps [s]')
+% ylabel('Accélération du fil de contact [m/s^2]')
+
+
+
+y = test3_g;
+[b, a] = butter(1, 20/(1000/2), 'low'); 
+y = filter(b, a, y);
+% xlabel('Temps [s]')
+% ylabel('Accélération du fil de contact [m/s^2]')
+% 
+% figure
+% plot(temps_60s,y)
+% hold on 
+
+moy = mean(y);
+y = y - moy;
+
+[b, a] = butter(1, 0.75/(1000/2), 'high'); 
+y_hp = filter(b, a, y);
+v_noise = cumtrapz(temps_60s, y_hp);
+
+% figure 
+% plot(temps_60s,y_hp)
+% 
+% hold off 
+% 
+% figure 
+% plot(temps_60s,v_noise)
+% ylabel('Vitesse du fil de contact [m/s]')
+% xlabel('Temps [s]')
+
+
+
+moy1 = mean(v_noise);
+v_noise = v_noise - moy1;
+[b, a] = butter(1, 0.75/(1000/2), 'high'); 
+v = filter(b, a, v_noise);
+x_noise = cumtrapz(temps_60s,v); 
+
+
+subplot(2,1,1)
+plot(temps_60s,test3*g)
+xlabel('Temps [s]')
+ylabel('Accélération du fil de contact [m/s^2]')
+
+
+subplot(2,1,2)
+plot(temps_60s,x_noise)
+yline(0.05, '--r', 'LineWidth', 2);
+yline(-0.05, '--r', 'LineWidth', 2);
+ylabel('Position du fil de contact [m]')
+xlabel('Temps [s]')
+
+
+
+
